@@ -142,3 +142,45 @@ fn outputPrometheus(allocator: std.mem.Allocator, url: []const u8, result: Resul
     defer allocator.free(up_line);
     stdout.writeAll(up_line) catch return;
 }
+
+// --- Tests ---
+
+test "successful HTTP request returns status 200 and up=1" {
+    const allocator = std.testing.allocator;
+    const result = checkUrl(allocator, "https://httpbin.org/bytes/64");
+
+    try std.testing.expect(result.http_status != null);
+    try std.testing.expectEqual(@as(u16, 200), result.http_status.?);
+    try std.testing.expect(!result.dns_error);
+    try std.testing.expect(!result.connection_error);
+    try std.testing.expect(!result.tls_error);
+    try std.testing.expect(result.response_time_seconds > 0.0);
+}
+
+test "HTTP 404 returns status 404 and up=1" {
+    const allocator = std.testing.allocator;
+    const result = checkUrl(allocator, "https://httpbin.org/status/404");
+
+    try std.testing.expect(result.http_status != null);
+    try std.testing.expectEqual(@as(u16, 404), result.http_status.?);
+    try std.testing.expect(!result.dns_error);
+    try std.testing.expect(!result.connection_error);
+    try std.testing.expect(!result.tls_error);
+}
+
+test "DNS error for non-existent domain" {
+    const allocator = std.testing.allocator;
+    const result = checkUrl(allocator, "https://this-domain-does-not-exist-xyz123.example.com/");
+
+    try std.testing.expectEqual(@as(?u16, null), result.http_status);
+    try std.testing.expect(result.dns_error or result.connection_error);
+}
+
+test "response time is positive for valid request" {
+    const allocator = std.testing.allocator;
+    const result = checkUrl(allocator, "https://httpbin.org/bytes/64");
+
+    try std.testing.expect(result.response_time_seconds > 0.0);
+    try std.testing.expect(result.response_time_seconds < 30.0);
+}
+
