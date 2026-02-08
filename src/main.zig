@@ -14,41 +14,17 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const url = readUrl(allocator) catch {
+    // Read URL from CLI argument
+    var args = std.process.args();
+    _ = args.next(); // skip program name
+    const url = args.next() orelse {
         const stderr = std.fs.File.stderr();
-        stderr.writeAll("ERROR: Failed to read URL from stdin\n") catch {};
+        stderr.writeAll("Usage: htcheck <url>\n") catch {};
         std.process.exit(1);
     };
-    defer allocator.free(url);
-
-    if (url.len == 0) {
-        const stderr = std.fs.File.stderr();
-        stderr.writeAll("ERROR: Empty URL provided\n") catch {};
-        std.process.exit(1);
-    }
 
     const result = checkUrl(allocator, url);
     outputPrometheus(allocator, url, result);
-}
-
-fn readUrl(allocator: std.mem.Allocator) ![]const u8 {
-    const stdin = std.fs.File.stdin();
-    var buf: [8192]u8 = undefined;
-    var total: usize = 0;
-
-    while (total < buf.len) {
-        const n = stdin.read(buf[total..]) catch break;
-        if (n == 0) break;
-        // Check for newline in just-read bytes
-        if (std.mem.indexOfScalar(u8, buf[total .. total + n], '\n')) |nl| {
-            total += nl;
-            break;
-        }
-        total += n;
-    }
-
-    const trimmed = std.mem.trim(u8, buf[0..total], &std.ascii.whitespace);
-    return allocator.dupe(u8, trimmed);
 }
 
 fn checkUrl(allocator: std.mem.Allocator, url: []const u8) Result {
@@ -64,6 +40,7 @@ fn checkUrl(allocator: std.mem.Allocator, url: []const u8) Result {
     const fetch_result = client.fetch(.{
         .location = .{ .url = url },
         .method = .GET,
+
     }) catch |err| {
         result.response_time_seconds = readSeconds(&timer);
         classifyError(&result, err);

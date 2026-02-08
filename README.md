@@ -17,7 +17,13 @@ Binary: `zig-out/bin/htcheck`
 ## Usage
 
 ```bash
-echo "https://example.com" | ./zig-out/bin/htcheck
+htcheck <url>
+```
+
+Example:
+
+```bash
+./zig-out/bin/htcheck https://example.com
 ```
 
 ## Output
@@ -53,14 +59,14 @@ htcheck_up{url="https://example.com"} 1
 ### Textfile Collector (node_exporter)
 
 ```bash
-echo "https://myservice.example.com" | /usr/local/bin/htcheck \
+htcheck https://myservice.example.com \
   > /var/lib/prometheus/node-exporter/htcheck_myservice.prom
 ```
 
 ### Cron
 
 ```cron
-* * * * * echo "https://myservice.example.com" | /usr/local/bin/htcheck > /var/lib/prometheus/node-exporter/htcheck_myservice.prom 2>&1
+* * * * * /usr/local/bin/htcheck https://myservice.example.com > /var/lib/prometheus/node-exporter/htcheck_myservice.prom 2>&1
 ```
 
 ### script_exporter
