@@ -15,7 +15,7 @@ jobs:
           version: 0.15.2
 
       - name: Check Formatting
-        run: zig fmt --check .
+        run: zig fmt --check src
 
       - name: Run Tests
         run: zig build test

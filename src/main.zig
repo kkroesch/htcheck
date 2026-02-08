@@ -41,7 +41,6 @@ fn checkUrl(allocator: std.mem.Allocator, url: []const u8) Result {
     const fetch_result = client.fetch(.{
         .location = .{ .url = url },
         .method = .GET,
-
     }) catch |err| {
         result.response_time_seconds = readSeconds(&timer);
         classifyError(&result, err);
@@ -184,4 +183,3 @@ test "response time is positive for valid request" {
     try std.testing.expect(result.response_time_seconds > 0.0);
     try std.testing.expect(result.response_time_seconds < 30.0);
 }
-
