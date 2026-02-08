@@ -14,8 +14,9 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    // Read URL from CLI argument
-    var args = std.process.args();
+    // Read URL from CLI argument (Platform independent).
+    var args = try std.process.argsWithAllocator(allocator);
+    defer args.deinit();
     _ = args.next(); // skip program name
     const url = args.next() orelse {
         const stderr = std.fs.File.stderr();
