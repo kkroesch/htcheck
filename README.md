@@ -63,6 +63,15 @@ htcheck https://myservice.example.com \
   > /var/lib/prometheus/node-exporter/htcheck_myservice.prom
 ```
 
+### Direct Push
+
+```bash
+#!/bin/bash
+VM_URL="http://victoria-metrics:8428"
+METRICS=$(/usr/local/bin/htcheck https://myservice.example.com)
+echo "$METRICS" | curl -s -X POST "${VM_URL}/api/v1/import/prometheus" --data-binary @-
+```
+
 ### Cron
 
 ```cron
