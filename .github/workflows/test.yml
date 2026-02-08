@@ -1,0 +1,21 @@
+name: Zig Tests
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: 0.15.2  # WICHTIG: Hier deine lokale Version eintragen!
+
+      - name: Check Formatting
+        run: zig fmt --check .
+
+      - name: Run Tests
+        run: zig build test
