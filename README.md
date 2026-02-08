@@ -2,7 +2,7 @@
 [![Zig Tests](https://github.com/kkroesch/htcheck/actions/workflows/test.yml/badge.svg)](https://github.com/kkroesch/htcheck/actions/workflows/test.yml)
 
 
-![](logo.jpg)
+![](logo.png)
 
 # htcheck
 
