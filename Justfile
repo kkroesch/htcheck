@@ -11,3 +11,7 @@ build:
 # Run locally
 run url="https://wikipedia.org/":
     zig build run -- {{url}}
+
+# Run with --short flag
+short url="https://wikipedia.org/":
+    zig run -- --short {{url}}

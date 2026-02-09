@@ -3,7 +3,6 @@
 
 
 ![](logo.png)
-
 # htcheck
 
 HTTP health checker with Prometheus-compatible metric output. Written in Zig.
@@ -23,16 +22,26 @@ Binary: `zig-out/bin/htcheck`
 ## Usage
 
 ```bash
+# Prometheus metrics (default) – for cron/push to VictoriaMetrics
 htcheck <url>
+
+# Short mode – compact colored CLI output for quick admin checks
+htcheck -s <url>
+htcheck --short <url>
+
+# Help
+htcheck -h
 ```
 
-Example:
+### Short mode
 
-```bash
-./zig-out/bin/htcheck https://example.com
+```
+✓ 2025-02-09 14:23:01  200  0.342s  12.4K  https://example.com
+✗ 2025-02-09 14:23:02  ---  0.001s  0B     https://broken.invalid
+  └ UnknownHostName
 ```
 
-## Output
+### Prometheus mode (default)
 
 ```
 # HELP htcheck_http_status_code HTTP response status code (0 if no response)
@@ -71,12 +80,15 @@ htcheck https://myservice.example.com \
 
 ### Direct Push
 
+Values can be pushed directly to VictoriaMetrics using the Prometheus remote write API:
+
 ```bash
 #!/bin/bash
 VM_URL="http://victoria-metrics:8428"
 METRICS=$(/usr/local/bin/htcheck https://myservice.example.com)
 echo "$METRICS" | curl -s -X POST "${VM_URL}/api/v1/import/prometheus" --data-binary @-
 ```
+
 
 ### Cron
 

@@ -10,22 +10,52 @@ const Result = struct {
     error_message: []const u8 = "",
 };
 
+const OutputMode = enum { prometheus, short };
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    // Read URL from CLI argument
     var args = std.process.args();
     _ = args.next(); // skip program name
-    const url = args.next() orelse {
+
+    var mode: OutputMode = .prometheus;
+    var url: ?[]const u8 = null;
+
+    while (args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "-s") or std.mem.eql(u8, arg, "--short")) {
+            mode = .short;
+        } else if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
+            const stderr = std.fs.File.stderr();
+            stderr.writeAll(
+                \\Usage: htcheck [OPTIONS] <url>
+                \\
+                \\Options:
+                \\  -s, --short   Compact CLI output for quick checks
+                \\  -h, --help    Show this help
+                \\
+                \\Default output is Prometheus metrics format.
+                \\
+            ) catch {};
+            std.process.exit(0);
+        } else {
+            url = arg;
+        }
+    }
+
+    const target_url = url orelse {
         const stderr = std.fs.File.stderr();
-        stderr.writeAll("Usage: htcheck <url>\n") catch {};
+        stderr.writeAll("Usage: htcheck [OPTIONS] <url>\n") catch {};
         std.process.exit(1);
     };
 
-    const result = checkUrl(allocator, url);
-    outputPrometheus(allocator, url, result);
+    const result = checkUrl(allocator, target_url);
+
+    switch (mode) {
+        .prometheus => outputPrometheus(allocator, target_url, result),
+        .short => outputShort(allocator, target_url, result),
+    }
 }
 
 fn checkUrl(allocator: std.mem.Allocator, url: []const u8) Result {
@@ -155,6 +185,104 @@ fn outputPrometheus(allocator: std.mem.Allocator, url: []const u8, result: Resul
     const up_line = std.fmt.allocPrint(allocator, "htcheck_up{{url=\"{s}\"}} {d}\n", .{ url, up }) catch return;
     defer allocator.free(up_line);
     stdout.writeAll(up_line) catch return;
+}
+
+fn outputShort(allocator: std.mem.Allocator, url: []const u8, result: Result) void {
+    const stdout = std.fs.File.stdout();
+
+    // ANSI color codes
+    const reset = "\x1b[0m";
+    const bold = "\x1b[1m";
+    const green = "\x1b[32m";
+    const red = "\x1b[31m";
+    const yellow = "\x1b[33m";
+    const dim = "\x1b[2m";
+
+    // Timestamp: get epoch seconds and format as ISO-ish
+    const epoch_secs = @divFloor(std.time.milliTimestamp(), @as(i64, 1000));
+    const es = std.time.epoch.EpochSeconds{ .secs = @intCast(epoch_secs) };
+    const day = es.getEpochDay();
+    const yd = day.calculateYearDay();
+    const md = yd.calculateMonthDay();
+    const ds = es.getDaySeconds();
+
+    const timestamp = std.fmt.allocPrint(allocator, "{d:0>4}-{d:0>2}-{d:0>2} {d:0>2}:{d:0>2}:{d:0>2}", .{
+        yd.year,
+        @intFromEnum(md.month),
+        md.day_index + 1,
+        ds.getHoursIntoDay(),
+        ds.getMinutesIntoHour(),
+        ds.getSecondsIntoMinute(),
+    }) catch return;
+    defer allocator.free(timestamp);
+
+    // Status indicator and color
+    const is_up = result.http_status != null and !result.dns_error and !result.connection_error and !result.tls_error;
+    const status_icon = if (is_up) "✓" else "✗";
+    const status_color = if (is_up) green else red;
+
+    // Status code string
+    const status_str = if (result.http_status) |s|
+        std.fmt.allocPrint(allocator, "{d}", .{s}) catch return
+    else
+        std.fmt.allocPrint(allocator, "---", .{}) catch return;
+    defer allocator.free(status_str);
+
+    // Status code color: 2xx green, 3xx yellow, 4xx/5xx red
+    const code_color = if (result.http_status) |s| blk: {
+        break :blk if (s >= 200 and s < 300) green else if (s >= 300 and s < 400) yellow else red;
+    } else red;
+
+    // Response time with color (green <1s, yellow <3s, red >=3s)
+    const time_color = if (result.response_time_seconds < 1.0) green else if (result.response_time_seconds < 3.0) yellow else red;
+
+    // Format size human-readable
+    const size_str = if (result.content_length_bytes >= 1048576)
+        std.fmt.allocPrint(allocator, "{d:.1}M", .{@as(f64, @floatFromInt(result.content_length_bytes)) / 1048576.0}) catch return
+    else if (result.content_length_bytes >= 1024)
+        std.fmt.allocPrint(allocator, "{d:.1}K", .{@as(f64, @floatFromInt(result.content_length_bytes)) / 1024.0}) catch return
+    else
+        std.fmt.allocPrint(allocator, "{d}B", .{result.content_length_bytes}) catch return;
+    defer allocator.free(size_str);
+
+    // Main line: ✓ 2025-02-09 14:23:01  200  0.342s  12.4K  https://example.com
+    // Build with separate writes to avoid runtime string concat
+    stdout.writeAll(status_color) catch return;
+    stdout.writeAll(status_icon) catch return;
+    stdout.writeAll(reset) catch return;
+    stdout.writeAll(" ") catch return;
+    stdout.writeAll(dim) catch return;
+    stdout.writeAll(timestamp) catch return;
+    stdout.writeAll(reset) catch return;
+    stdout.writeAll("  ") catch return;
+    stdout.writeAll(bold) catch return;
+    stdout.writeAll(code_color) catch return;
+    stdout.writeAll(status_str) catch return;
+    stdout.writeAll(reset) catch return;
+    stdout.writeAll("  ") catch return;
+    stdout.writeAll(time_color) catch return;
+    const time_str = std.fmt.allocPrint(allocator, "{d:.3}s", .{result.response_time_seconds}) catch return;
+    defer allocator.free(time_str);
+    stdout.writeAll(time_str) catch return;
+    stdout.writeAll(reset) catch return;
+    stdout.writeAll("  ") catch return;
+    stdout.writeAll(dim) catch return;
+    stdout.writeAll(size_str) catch return;
+    stdout.writeAll(reset) catch return;
+    stdout.writeAll("  ") catch return;
+    stdout.writeAll(bold) catch return;
+    stdout.writeAll(url) catch return;
+    stdout.writeAll(reset) catch return;
+    stdout.writeAll("\n") catch return;
+
+    // Error detail line (only if errors present)
+    if (result.error_message.len > 0) {
+        const err_line = std.fmt.allocPrint(allocator, "  {s}└ {s}{s}\n", .{
+            red, result.error_message, reset,
+        }) catch return;
+        defer allocator.free(err_line);
+        stdout.writeAll(err_line) catch return;
+    }
 }
 
 // --- Tests ---
