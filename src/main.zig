@@ -6,6 +6,7 @@ const Result = struct {
     connection_error: bool = false,
     tls_error: bool = false,
     response_time_seconds: f64 = 0.0,
+    content_length_bytes: u64 = 0,
     error_message: []const u8 = "",
 };
 
@@ -14,9 +15,8 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    // Read URL from CLI argument (Platform independent).
-    var args = try std.process.argsWithAllocator(allocator);
-    defer args.deinit();
+    // Read URL from CLI argument
+    var args = std.process.args();
     _ = args.next(); // skip program name
     const url = args.next() orelse {
         const stderr = std.fs.File.stderr();
@@ -38,9 +38,14 @@ fn checkUrl(allocator: std.mem.Allocator, url: []const u8) Result {
     var client: std.http.Client = .{ .allocator = allocator };
     defer client.deinit();
 
+    // Use Io.Writer.Allocating to capture the response body
+    var response_buf = std.Io.Writer.Allocating.init(allocator);
+    defer response_buf.deinit();
+
     const fetch_result = client.fetch(.{
         .location = .{ .url = url },
         .method = .GET,
+        .response_writer = &response_buf.writer,
     }) catch |err| {
         result.response_time_seconds = readSeconds(&timer);
         classifyError(&result, err);
@@ -49,6 +54,7 @@ fn checkUrl(allocator: std.mem.Allocator, url: []const u8) Result {
 
     result.response_time_seconds = readSeconds(&timer);
     result.http_status = @intFromEnum(fetch_result.status);
+    result.content_length_bytes = response_buf.written().len;
     return result;
 }
 
@@ -135,6 +141,14 @@ fn outputPrometheus(allocator: std.mem.Allocator, url: []const u8, result: Resul
     defer allocator.free(tls_line);
     stdout.writeAll(tls_line) catch return;
 
+    stdout.writeAll("# HELP htcheck_content_length_bytes Response body size in bytes\n") catch return;
+    stdout.writeAll("# TYPE htcheck_content_length_bytes gauge\n") catch return;
+    const cl_line = std.fmt.allocPrint(allocator, "htcheck_content_length_bytes{{url=\"{s}\"}} {d}\n\n", .{
+        url, result.content_length_bytes,
+    }) catch return;
+    defer allocator.free(cl_line);
+    stdout.writeAll(cl_line) catch return;
+
     stdout.writeAll("# HELP htcheck_up Target reachable with valid HTTP response (1=up, 0=down)\n") catch return;
     stdout.writeAll("# TYPE htcheck_up gauge\n") catch return;
     const up: u8 = if (result.http_status != null and !result.dns_error and !result.connection_error and !result.tls_error) 1 else 0;
@@ -155,6 +169,7 @@ test "successful HTTP request returns status 200 and up=1" {
     try std.testing.expect(!result.connection_error);
     try std.testing.expect(!result.tls_error);
     try std.testing.expect(result.response_time_seconds > 0.0);
+    try std.testing.expectEqual(@as(u64, 64), result.content_length_bytes);
 }
 
 test "HTTP 404 returns status 404 and up=1" {
@@ -183,3 +198,4 @@ test "response time is positive for valid request" {
     try std.testing.expect(result.response_time_seconds > 0.0);
     try std.testing.expect(result.response_time_seconds < 30.0);
 }
+
