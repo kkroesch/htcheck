@@ -326,4 +326,3 @@ test "response time is positive for valid request" {
     try std.testing.expect(result.response_time_seconds > 0.0);
     try std.testing.expect(result.response_time_seconds < 30.0);
 }
-
