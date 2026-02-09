@@ -1,15 +1,21 @@
 
 [![Zig Tests](https://github.com/kkroesch/htcheck/actions/workflows/test.yml/badge.svg)](https://github.com/kkroesch/htcheck/actions/workflows/test.yml)
 
-
 ![](logo.png)
-# htcheck
 
-HTTP health checker with Prometheus-compatible metric output. Written in Zig.
+# moncheck
+
+Lightweight monitoring tools with Prometheus-compatible metric output. Written in Zig.
+
+Two binaries, one project:
+
+- **htcheck** – HTTP health checker
+- **certcheck** – TLS certificate expiry checker
 
 ## Requirements
 
-Zig 0.15.2
+- Zig 0.15.2
+- `openssl` CLI in PATH (for certcheck)
 
 ## Build
 
@@ -17,20 +23,25 @@ Zig 0.15.2
 zig build -Doptimize=ReleaseSafe
 ```
 
-Binary: `zig-out/bin/htcheck`
-
-## Usage
+Binaries: `zig-out/bin/htcheck` and `zig-out/bin/certcheck`
 
 ```bash
-# Prometheus metrics (default) – for cron/push to VictoriaMetrics
-htcheck <url>
+zig build test        # Run all tests
+zig build run-htcheck -- -s https://example.com
+zig build run-certcheck -- -s example.com
+```
 
-# Short mode – compact colored CLI output for quick admin checks
-htcheck -s <url>
+## htcheck
+
+HTTP health checker. Measures status code, response time, content length, and classifies errors (DNS, TCP, TLS).
+
+### Usage
+
+```bash
+htcheck <url>              # Prometheus metrics (default)
+htcheck -s <url>           # Short colored CLI output
 htcheck --short <url>
-
-# Help
-htcheck -h
+htcheck -h                 # Help
 ```
 
 ### Short mode
@@ -41,61 +52,112 @@ htcheck -h
   └ UnknownHostName
 ```
 
-### Prometheus mode (default)
+### Prometheus output
 
 ```
-# HELP htcheck_http_status_code HTTP response status code (0 if no response)
-# TYPE htcheck_http_status_code gauge
 htcheck_http_status_code{url="https://example.com"} 200
-
-# HELP htcheck_dns_error DNS resolution error (1=error, 0=ok)
-# TYPE htcheck_dns_error gauge
 htcheck_dns_error{url="https://example.com"} 0
-
-# HELP htcheck_response_time_seconds Time until HTTP response in seconds
-# TYPE htcheck_response_time_seconds gauge
-htcheck_response_time_seconds{url="https://example.com"} 0.042318
-
-# HELP htcheck_connection_error TCP connection error (1=error, 0=ok)
-# TYPE htcheck_connection_error gauge
 htcheck_connection_error{url="https://example.com"} 0
-
-# HELP htcheck_tls_error TLS handshake error (1=error, 0=ok)
-# TYPE htcheck_tls_error gauge
 htcheck_tls_error{url="https://example.com"} 0
-
-# HELP htcheck_up Target reachable with valid HTTP response (1=up, 0=down)
-# TYPE htcheck_up gauge
+htcheck_response_time_seconds{url="https://example.com"} 0.042318
+htcheck_content_length_bytes{url="https://example.com"} 12847
 htcheck_up{url="https://example.com"} 1
+```
+
+## certcheck
+
+TLS certificate expiry checker. Connects to a remote host via `openssl s_client` and reports certificate details and days until expiry.
+
+### Usage
+
+```bash
+certcheck <host[:port]>    # Prometheus metrics (default)
+certcheck -s <host>        # Short colored CLI output
+certcheck -h               # Help
+```
+
+Default port is 443. Also accepts URL-style input (`https://example.com`).
+
+### Short mode
+
+```
+✓ 2025-02-09 14:23:01  🔒 87d  example.com  C=US, O=Let's Encrypt, CN=R3
+✓ 2025-02-09 14:23:02  🔒 12d  staging.example.com  C=US, O=Let's Encrypt, CN=R3
+✗ 2025-02-09 14:23:03  🔓 -3d  expired.example.com  C=US, O=Let's Encrypt, CN=R3
+```
+
+Color scheme: green (>30d), yellow (7–30d), red (≤7d).
+
+### Prometheus output
+
+```
+certcheck_days_remaining{host="example.com",port="443"} 87
+certcheck_expired{host="example.com",port="443"} 0
+certcheck_up{host="example.com",port="443"} 1
 ```
 
 ## Integration
 
-### Textfile Collector (node_exporter)
+### Push to VictoriaMetrics
 
 ```bash
+VM_URL="http://victoria:8428/api/v1/import/prometheus"
+
 htcheck https://myservice.example.com \
-  > /var/lib/prometheus/node-exporter/htcheck_myservice.prom
+  | curl -s -X POST "$VM_URL?extra_label=job=htcheck" --data-binary @-
+
+certcheck example.com \
+  | curl -s -X POST "$VM_URL?extra_label=job=certcheck" --data-binary @-
 ```
 
-### Direct Push
+### Textfile collector (node_exporter / Caddy)
 
-Values can be pushed directly to VictoriaMetrics using the Prometheus remote write API:
+```bash
+htcheck https://myservice.example.com > /var/lib/prometheus/htcheck.prom.tmp
+mv /var/lib/prometheus/htcheck.prom.tmp /var/lib/prometheus/htcheck.prom
+```
+
+Atomic `mv` ensures no partial reads.
+
+### Cron – check multiple targets
 
 ```bash
 #!/bin/bash
-VM_URL="http://victoria-metrics:8428"
-METRICS=$(/usr/local/bin/htcheck https://myservice.example.com)
-echo "$METRICS" | curl -s -X POST "${VM_URL}/api/v1/import/prometheus" --data-binary @-
+for url in https://app.example.com https://api.example.com; do
+    htcheck "$url" | curl -s -X POST "$VM_URL?extra_label=job=htcheck" --data-binary @-
+done
+
+for host in app.example.com api.example.com; do
+    certcheck "$host" | curl -s -X POST "$VM_URL?extra_label=job=certcheck" --data-binary @-
+done
 ```
 
+### Quick admin check
 
-### Cron
-
-```cron
-* * * * * /usr/local/bin/htcheck https://myservice.example.com > /var/lib/prometheus/node-exporter/htcheck_myservice.prom 2>&1
+```bash
+for host in kroesch.ch api.example.com staging.example.com; do
+    htcheck -s "https://$host"
+    certcheck -s "$host"
+done
 ```
 
-### script_exporter
+### Alerting example (Prometheus/Alertmanager)
 
-Works with [script_exporter](https://github.com/ricoberger/script_exporter) as well.
+```yaml
+groups:
+  - name: moncheck
+    rules:
+      - alert: EndpointDown
+        expr: htcheck_up == 0
+        for: 5m
+        labels:
+          severity: critical
+
+      - alert: CertExpiringSoon
+        expr: certcheck_days_remaining < 14
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Cert {{ $labels.host }} expires in {{ $value }} days"
+```
