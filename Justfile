@@ -8,6 +8,9 @@ test:
 build:
     zig build -Doptimize=ReleaseSafe
 
+cc:
+    zig build-exe -OReleaseSafe src/certcheck.zig
+
 # Run locally
 run url="https://wikipedia.org/":
     zig build run -- {{url}}
