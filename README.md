@@ -3,7 +3,7 @@
 
 ![](logo.png)
 
-# moncheck
+# Htcheck & Co.
 
 Lightweight monitoring tools with Prometheus-compatible metric output. Written in Zig.
 
